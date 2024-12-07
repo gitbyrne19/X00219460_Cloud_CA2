@@ -1,22 +1,42 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
 steps:
-# Step 1: Build Docker image using the Dockerfile
-- name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', 'gcr.io/$PROJECT_ID/my-flask-app:$COMMIT_SHA', '.']
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '3.x'
+    addToPath: true
 
-# Step 2: Push Docker image to Google Container Registry
-- name: 'gcr.io/cloud-builders/docker'
-  args: ['push', 'gcr.io/$PROJECT_ID/my-flask-app:$COMMIT_SHA']
+- script: |
+    echo "Installing gcloud CLI"
+    curl -sSL https://sdk.cloud.google.com | bash
+    source ~/.bashrc
+    gcloud --version
+  displayName: 'Install Google Cloud SDK'
 
-# Step 3: Deploy to Google Cloud Run in europe-west2
-- name: 'gcr.io/cloud-builders/gcloud'
-  args:
-    [
-      'run', 'deploy', 'my-flask-app',
-      '--image', 'gcr.io/$PROJECT_ID/my-flask-app:$COMMIT_SHA',
-      '--platform', 'managed',
-      '--region', 'europe-west2',
-      '--allow-unauthenticated'
-    ]
+- script: |
+    echo "Authenticating with Google Cloud"
+    echo '{"client_email":"cloud-build-service-account@cloudproject-443119.iam.gserviceaccount.com","project_id":"cloudproject-443119","private_key_id":"[PRIVATE_KEY_ID]","private_key":"[PRIVATE_KEY_CONTENT]"}' > key.json
+    gcloud auth activate-service-account --key-file=key.json
+    gcloud config set project cloudproject-443119
+  displayName: 'Authenticate with Google Cloud'
 
-images:
-- 'gcr.io/$PROJECT_ID/my-flask-app:$COMMIT_SHA'
+- script: |
+    echo "Building and pushing Docker image"
+    docker build -t gcr.io/cloudproject-443119/my-flask-app:latest .
+    docker push gcr.io/cloudproject-443119/my-flask-app:latest
+  displayName: 'Build and Push Docker Image'
+
+- script: |
+    echo "Deploying to Google Cloud Run"
+    gcloud run deploy my-flask-app \
+      --image gcr.io/cloudproject-443119/my-flask-app:latest \
+      --region europe-west2 \
+      --platform managed \
+      --allow-unauthenticated
+  displayName: 'Deploy to Google Cloud Run'
